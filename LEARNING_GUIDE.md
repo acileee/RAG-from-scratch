@@ -739,29 +739,34 @@ Observe:
 
 ## Debugging Tips
 
-This section gives practical checks for the most common issues you may run into while running or modifying the RAG system.
+If you are learning RAG, debug the system like a pipeline instead of trying to fix everything at once.
 
-A good way to debug this project is to check the pipeline in order:
+Move through the system in order:
 
 ```text
-documents → chunks → embeddings → retrieval → context → prompt → LLM answer
+documents → chunks → embeddings → retrieval → reranking → answerability → prompt → LLM answer
 ```
 
-If something breaks, start from the earlier step and move forward.
+For each problem, ask:
+
+* **IF:** What happened?
+* **WHY:** What might be causing it?
+* **HOW:** How can I check or fix it?
+* **EXAMPLE:** What does this look like in practice?
 
 ---
 
-## 1. Check that Ollama is running
+### If Ollama connection fails
 
-The local LLM parts of the project depend on Ollama.
+**WHY:**
+The local Ollama server may not be running.
 
-Run:
+**HOW:**
+Check whether Ollama is running:
 
 ```bash
 curl http://localhost:11434/api/tags
 ```
-
-If Ollama is running, this should return JSON showing the models installed locally.
 
 If you get a connection error, start Ollama:
 
@@ -769,193 +774,302 @@ If you get a connection error, start Ollama:
 ollama serve
 ```
 
-Then open a second terminal and check again:
+Then run the check again:
 
 ```bash
 curl http://localhost:11434/api/tags
 ```
 
+**EXAMPLE:**
+If you see something like this:
+
+```text
+Failed to connect to localhost port 11434
+```
+
+it usually means Ollama is not running yet.
+
+Start it with:
+
+```bash
+ollama serve
+```
+
+Then open another terminal and try your Python script again.
+
 ---
 
-## 2. Check that the required models are installed
+### If the model is not found
 
-List installed models:
+**WHY:**
+The model name in the code may not match a model installed on your machine.
+
+**HOW:**
+Check installed models:
 
 ```bash
 ollama list
 ```
 
-You should see the models used by the project.
-
-For local answer generation:
+If the LLM model is missing:
 
 ```bash
 ollama pull llama3.2:1b
 ```
 
-For embeddings:
+If the embedding model is missing:
 
 ```bash
 ollama pull nomic-embed-text
 ```
 
-If the code uses a different model name, make sure the model name in the code matches the model installed on your machine.
+Also check that the model name in the code matches exactly.
 
-For example, this will fail if `llama3.2:1b` is not installed:
+**EXAMPLE:**
+If your code says:
 
 ```python
 model = "llama3.2:1b"
 ```
 
----
+but `ollama list` only shows:
 
-## 3. Test files one at a time
+```text
+llama3
+```
 
-If the full pipeline fails, do not start by debugging the whole system at once.
+then the names do not match.
 
-Run individual files first:
+Either install the correct model:
 
 ```bash
-python src/chunk_documents.py
-python src/local_embeddings.py
-python src/semantic_search.py
-python src/rag_pipeline.py
-python src/end_to_end_rag.py
+ollama pull llama3.2:1b
 ```
 
-This helps isolate where the problem is.
-
-If chunking fails, the issue is probably before retrieval.
-
-If embedding fails, the issue may be the embedding model or Ollama.
-
-If retrieval fails, the issue may be embeddings, similarity search, or Chroma.
-
-If generation fails, the issue is probably Ollama, the prompt, or the LLM model.
+or change the code to use the model you actually have installed.
 
 ---
 
-## 4. Check document format
+### If embeddings fail
 
-Documents should have the expected fields.
+**WHY:**
+The embedding model may not be installed, Ollama may not be running, or empty text may be passed into the embedding function.
 
-A document should look like this:
-
-```python
-{
-    "doc_id": "doc_1",
-    "filename": "example.txt",
-    "text": "Your document text here."
-}
-```
-
-If a document is missing `text`, the system cannot chunk it.
-
-If a document is missing `doc_id` or `filename`, metadata may become unclear later during retrieval and evaluation.
-
-Common problems:
-
-* `text` is empty
-* `doc_id` is missing
-* `filename` is missing
-* the document is not a dictionary
-* documents are not inside a list
-
----
-
-## 5. Check chunking output
-
-After chunking, each chunk should contain text and metadata.
-
-A chunk should look roughly like this:
-
-```python
-{
-    "chunk_id": "doc_1_chunk_0",
-    "doc_id": "doc_1",
-    "filename": "example.txt",
-    "text": "A smaller piece of the original document...",
-    "start_char": 0,
-    "end_char": 500
-}
-```
-
-If retrieval is bad, inspect the chunks first.
-
-Things to check:
-
-* Are chunks being created?
-* Is each chunk non-empty?
-* Are chunks too small?
-* Are chunks too large?
-* Is overlap working?
-* Are `doc_id` and `chunk_id` preserved?
-
-If chunks are too small, they may lose important context.
-
-If chunks are too large, retrieval may become less precise.
-
----
-
-## 6. Check embeddings
-
-Each embedded chunk should include an `embedding` field.
-
-Example:
-
-```python
-{
-    "chunk_id": "doc_1_chunk_0",
-    "text": "Some text...",
-    "embedding": [0.012, -0.043, 0.091, ...]
-}
-```
-
-Check that embeddings exist:
+**HOW:**
+Test embeddings with a small example:
 
 ```python
 from local_embeddings import embed_texts
 
 embeddings = embed_texts(["hello world"])
-print(type(embeddings))
 print(len(embeddings))
 print(len(embeddings[0]))
 ```
 
-Expected:
+If this fails, check Ollama and the embedding model.
 
-* `embeddings` should be a list
-* it should contain one embedding
-* the embedding should be a list of numbers
+If this works, check the text being passed into the embedding function.
 
-If embeddings are empty, retrieval will not work.
+**EXAMPLE:**
+Expected output may look like this:
 
-If embeddings fail, check:
+```text
+1
+768
+```
 
-* Ollama is running
-* the embedding model is installed
-* the model name is correct
-* the input text is not empty
+or another embedding dimension depending on the model.
+
+This means:
+
+* one text was embedded
+* the embedding is a vector with many numbers
+
+If you get an error instead, check:
+
+```bash
+ollama list
+```
+
+and make sure `nomic-embed-text` is installed.
 
 ---
 
-## 7. Check manual semantic search
+### If chunks are not being created
 
-Manual semantic search should return the top matching chunks.
+**WHY:**
+The input documents may not have the expected format.
 
-If results look wrong, check:
+**HOW:**
+Check that each document looks like this:
 
-* the query is not empty
-* chunks have embeddings
-* the query embedding is being created
-* similarity scores are being calculated
-* `top_k` is not too low
+```python
+{
+    "doc_id": "doc_1",
+    "filename": "example.txt",
+    "text": "Document text here."
+}
+```
 
-Example checks:
+Make sure:
+
+* `text` exists
+* `text` is not empty
+* documents are stored inside a list
+* `doc_id` and `filename` are present
+
+**EXAMPLE:**
+This is correct:
+
+```python
+documents = [
+    {
+        "doc_id": "doc_1",
+        "filename": "notes.txt",
+        "text": "RAG retrieves relevant context before generating an answer."
+    }
+]
+```
+
+This is wrong because `text` is missing:
+
+```python
+documents = [
+    {
+        "doc_id": "doc_1",
+        "filename": "notes.txt"
+    }
+]
+```
+
+This is also wrong because the document is not inside a list:
+
+```python
+documents = {
+    "doc_id": "doc_1",
+    "filename": "notes.txt",
+    "text": "RAG retrieves relevant context before generating an answer."
+}
+```
+
+---
+
+### If chunks are created but look wrong
+
+**WHY:**
+The chunk size or overlap may not be appropriate, or the document text may be too short, too messy, or empty.
+
+**HOW:**
+Print the first few chunks:
+
+```python
+for chunk in chunks[:3]:
+    print(chunk["chunk_id"])
+    print(chunk["text"])
+    print("---")
+```
+
+Check:
+
+* Are chunks empty?
+* Are chunks too tiny?
+* Are chunks too large?
+* Is important context split apart?
+* Are `doc_id`, `filename`, and `chunk_id` preserved?
+
+**EXAMPLE:**
+A useful chunk looks like this:
+
+```python
+{
+    "chunk_id": "doc_1_chunk_0",
+    "doc_id": "doc_1",
+    "filename": "notes.txt",
+    "text": "RAG retrieves relevant chunks from documents and uses them as context for the LLM.",
+    "start_char": 0,
+    "end_char": 95
+}
+```
+
+A bad chunk may look like this:
+
+```python
+{
+    "chunk_id": "doc_1_chunk_0",
+    "text": ""
+}
+```
+
+If chunks are empty, go back and check the original document text.
+
+---
+
+### If retrieval returns irrelevant chunks
+
+**WHY:**
+The chunks may be poor, embeddings may be missing, the query may be weak, or `top_k` may be too low.
+
+**HOW:**
+Print the retrieved chunks:
+
+```python
+for result in results:
+    print(result["chunk_id"], result.get("score"))
+    print(result["text"][:300])
+    print("---")
+```
+
+Then check:
+
+* Do the chunks contain useful information?
+* Are the similarity scores low?
+* Is the query too vague?
+* Does the document actually contain the answer?
+* Should `top_k` be increased?
+
+**EXAMPLE:**
+If the question is:
+
+```text
+What does RAG retrieve?
+```
+
+a good retrieved chunk might contain:
+
+```text
+RAG retrieves relevant chunks from documents before sending context to the LLM.
+```
+
+A bad retrieved chunk might contain:
+
+```text
+Python is a programming language used for many types of software development.
+```
+
+If retrieval returns bad chunks, the issue is probably before generation. Fix retrieval before blaming the LLM.
+
+---
+
+### If semantic search returns nothing useful
+
+**WHY:**
+The query embedding and chunk embeddings may not be comparable, the chunks may not contain the answer, or the query may be worded too differently from the documents.
+
+**HOW:**
+Check that chunks have embeddings:
+
+```python
+for chunk in embedded_chunks[:3]:
+    print(chunk["chunk_id"])
+    print("embedding" in chunk)
+    print(len(chunk["embedding"]))
+```
+
+Also test a simple query that you know should match your documents:
 
 ```python
 results = semantic_search(
-    query="What is RAG?",
+    query="retrieval augmented generation",
     embedded_chunks=embedded_chunks,
     top_k=3
 )
@@ -965,98 +1079,139 @@ for result in results:
     print(result["text"][:200])
 ```
 
-If the results are irrelevant, the problem may be:
+**EXAMPLE:**
+If your document contains:
 
-* weak document content
-* poor chunking
-* query wording
-* embedding mismatch
-* too small `top_k`
+```text
+Retrieval-Augmented Generation uses external context to improve LLM answers.
+```
 
----
+then this query should retrieve it:
 
-## 8. Check Chroma storage
+```text
+What does retrieval augmented generation use?
+```
 
-If you are using Chroma, make sure chunks were actually added or upserted into the collection.
-
-Things to check:
-
-* the Chroma path is correct
-* the collection name is correct
-* chunks were added before querying
-* IDs are unique
-* embeddings exist before upsert
-* documents and metadata were stored correctly
-
-If you keep getting old or strange results, you may be querying an old persistent Chroma collection.
-
-Possible fix:
-
-* use a new collection name
-* clear the local Chroma database folder
-* confirm that the current chunks are being upserted
-
-Be careful deleting local database folders if you still need the data.
+If it does not, check embeddings, chunking, or the semantic search function.
 
 ---
 
-## 9. Check query rewriting
+### If Chroma returns old or strange results
 
-If query rewriting gives strange results, print the original and rewritten query.
+**WHY:**
+You may be querying an old persistent collection.
 
-Example:
+**HOW:**
+Check:
+
+* the Chroma database path
+* the collection name
+* whether current chunks were upserted
+* whether old local data is still being reused
+
+When testing, try a new collection name:
+
+```python
+collection_name = "test_rag_chunks_v2"
+```
+
+If needed, clear the local Chroma database folder, but only if you do not need the stored data.
+
+**EXAMPLE:**
+If you changed your documents but Chroma keeps returning chunks from yesterday, you are probably using an old persistent collection.
+
+Try:
+
+```python
+collection_name = "debug_collection_new"
+```
+
+Then rebuild the collection and run retrieval again.
+
+---
+
+### If query rewriting makes results worse
+
+**WHY:**
+The rewritten query may be too different from the original question or may not match the wording in your documents.
+
+**HOW:**
+Print the original and rewritten query:
 
 ```python
 from query_rewriting import rewrite_query
 
 query = "How do LLMs use RAG?"
-rewritten = rewrite_query(query)
-
 print("Original:", query)
-print("Rewritten:", rewritten)
+print("Rewritten:", rewrite_query(query))
 ```
 
-Expected behavior:
+Compare retrieval with and without rewriting.
+
+**EXAMPLE:**
+Good rewrite:
 
 ```text
-LLM → large language model
-RAG → retrieval augmented generation
-KG → knowledge graph
-AI → artificial intelligence
+Original: How do LLMs use RAG?
+Rewritten: how do large language models use retrieval augmented generation
 ```
 
-If rewriting makes retrieval worse, compare retrieval with and without rewriting.
+Bad rewrite:
+
+```text
+Original: How do LLMs use RAG?
+Rewritten: models generation retrieval something
+```
+
+If rewriting makes the query awkward, test retrieval using the original query.
 
 ---
 
-## 10. Check multi-query retrieval
+### If multi-query retrieval returns duplicate results
 
-Multi-query retrieval uses multiple versions of the same question.
+**WHY:**
+The same chunk may be retrieved by multiple query variants.
 
-Debug by printing the variants:
+**HOW:**
+Check that results are deduplicated by `chunk_id`.
+
+Each chunk should only appear once in the final result list.
+
+Print the returned chunk IDs:
 
 ```python
-from multi_query import generate_query_variants
-
-variants = generate_query_variants("How do LLMs use RAG?")
-print(variants)
+for result in results:
+    print(result["chunk_id"])
 ```
 
-Then check whether each variant retrieves useful chunks.
+**EXAMPLE:**
+Bad output:
 
-If multi-query retrieval returns duplicates, make sure results are being deduplicated by `chunk_id`.
+```text
+doc_1_chunk_0
+doc_1_chunk_0
+doc_1_chunk_2
+```
 
-If it returns noisy results, reduce `top_k_per_query` or improve query rewriting.
+Good output:
+
+```text
+doc_1_chunk_0
+doc_1_chunk_2
+doc_3_chunk_1
+```
+
+If duplicates still appear, inspect the merge logic inside `multi_query.py`.
 
 ---
 
-## 11. Check reranking
+### If reranking does not improve results
 
-Reranking happens after retrieval.
+**WHY:**
+Reranking only reorders already retrieved chunks. If retrieval found bad chunks, reranking cannot fully fix that.
 
-It should not create new chunks. It only reorders retrieved chunks.
-
-If reranking looks wrong, print the scores:
+**HOW:**
+Print the reranking scores:
 
 ```python
 for chunk in reranked_chunks:
@@ -1064,62 +1219,129 @@ for chunk in reranked_chunks:
     print("original:", chunk.get("original_score"))
     print("overlap:", chunk.get("overlap_score"))
     print("rerank:", chunk.get("rerank_score"))
+    print("---")
 ```
 
-If overlap scores are always zero, check:
+If overlap scores are zero, check tokenization, query wording, and whether the retrieved chunks share terms with the query.
 
-* tokenization
-* query wording
-* chunk text
-* stopword removal
+**EXAMPLE:**
+For the query:
 
-If reranking makes results worse, compare before and after reranking.
+```text
+What is retrieval augmented generation?
+```
+
+a relevant chunk may have:
+
+```text
+overlap: 3
+```
+
+because it shares words like:
+
+```text
+retrieval
+augmented
+generation
+```
+
+An irrelevant chunk may have:
+
+```text
+overlap: 0
+```
+
+If all chunks have overlap `0`, the query and retrieved text may not share useful terms, or tokenization may be too aggressive.
 
 ---
 
-## 12. Check answerability
+### If the system keeps saying “I don't know based on the provided context.”
 
-Answerability checks whether the retrieved context is strong enough to answer the question.
+**WHY:**
+The answerability gate probably decided the retrieved context was not strong enough.
 
-If the system keeps saying:
+**HOW:**
+Inspect the retrieved chunks:
 
-```text
-I don't know based on the provided context.
+```python
+for chunk in retrieved_chunks:
+    print(chunk["chunk_id"])
+    print(chunk.get("score"))
+    print(chunk["text"][:300])
+    print("---")
 ```
 
-check:
+If the chunks are irrelevant, fix retrieval first.
 
-* were relevant chunks retrieved?
-* are scores too low?
-* is token overlap too low?
-* are `min_score` and `min_overlap` too strict?
-* is the query phrased differently from the documents?
-
-Try lowering thresholds temporarily:
+If the chunks are relevant but the system still says it does not know, the thresholds may be too strict. Try lowering them temporarily:
 
 ```python
 min_score = 0.1
 min_overlap = 1
 ```
 
-If answerability becomes `True`, the issue was probably strict thresholds.
+**EXAMPLE:**
+If the question is:
 
-If it is still `False`, retrieval may not be returning useful context.
+```text
+What does RAG use to answer questions?
+```
+
+and the retrieved chunk says:
+
+```text
+RAG uses retrieved document context to ground the LLM answer.
+```
+
+but answerability is still `False`, your thresholds may be too strict.
+
+If the retrieved chunk says:
+
+```text
+Python supports functions, classes, and modules.
+```
+
+then answerability should be `False`, because the context does not answer the question.
 
 ---
 
-## 13. Check prompt construction
+### If the prompt is `None`
 
-Before blaming the LLM, inspect the final prompt.
+**WHY:**
+The answerability gate likely decided that the retrieved context was not strong enough to answer the question.
 
-A RAG prompt should include:
+**HOW:**
+Check the answerability value and retrieved chunks:
 
-* instructions
-* retrieved context
-* the user question
-* a rule to only answer from context
+```python
+print(rag_input["answerable"])
+print(rag_input["retrieved_chunks"])
+```
 
-Print the prompt:
+If `answerable` is `False`, the system intentionally skipped prompt construction and returned the fallback answer.
+
+**EXAMPLE:**
+This is expected behavior:
+
+```python
+{
+    "answerable": False,
+    "prompt": None,
+    "fallback_answer": "I don't know based on the provided context."
+}
+```
+
+It means the system refused to build a prompt because the evidence was weak.
+
+---
+
+### If the LLM gives an unsupported answer
+
+**WHY:**
+The retrieved context may be noisy, the prompt may be too loose, or the answerability gate may be too permissive.
+
+**HOW:**
+Print the final prompt:
 
 ```python
 print(rag_input["prompt"])
@@ -1127,111 +1349,148 @@ print(rag_input["prompt"])
 
 Check:
 
-* Is the context empty?
-* Is the question included?
-* Are the retrieved chunks readable?
-* Is the fallback instruction included?
+* Is the context relevant?
+* Is there too much irrelevant context?
+* Does the prompt tell the model to answer only from context?
+* Should answerability thresholds be stricter?
 
-If the prompt is empty or `None`, the answerability gate may have decided the question was not answerable.
+**EXAMPLE:**
+If your context says:
+
+```text
+RAG retrieves relevant chunks from documents.
+```
+
+but the LLM answers with unrelated information about model training, the prompt may need a stronger instruction like:
+
+```text
+Answer only using the context. If the context does not contain the answer, say you do not know.
+```
 
 ---
 
-## 14. Check local LLM generation
+### If local LLM generation times out
 
-If retrieval works but answer generation fails, the issue is probably the local LLM call.
+**WHY:**
+The model may be slow on your machine, the prompt may be too long, or the timeout may be too short.
 
-Check:
+**HOW:**
+Try:
 
-* Ollama is running
-* the model is installed
-* the model name is correct
-* the prompt is not empty
-* the request is not timing out
+* using a smaller model
+* increasing the timeout
+* reducing `top_k`
+* shortening the retrieved context
 
-Run a simple Ollama test outside the RAG system:
+Test Ollama directly:
 
 ```bash
 ollama run llama3.2:1b
 ```
 
-Then ask a simple question.
+**EXAMPLE:**
+If generation works in the terminal but fails in Python, the issue may be your Python request timeout.
 
-If that works, the model is fine and the issue is likely in the Python call or prompt.
+If generation is slow everywhere, the model may be too heavy for your machine.
 
 ---
 
-## 15. Check Graph-RAG
+### If Graph-RAG does not add extra chunks
 
-Graph-RAG depends on three things:
+**WHY:**
+The graph may not contain useful entities or connections.
 
-* chunks
-* extracted entities
-* graph connections
-
-If Graph-RAG does not add extra chunks, check:
-
-* entities were extracted from chunks
-* the graph has entity nodes
-* chunk nodes are connected to entity nodes
-* related chunks share entities
-* `max_extra_chunks` is not set too low
-
-Print graph summary:
+**HOW:**
+Print the graph summary:
 
 ```python
 summary = summarize_graph(graph)
 print(summary)
 ```
 
-If there are no entity nodes, the issue is probably entity extraction.
+Check:
 
-If there are no edges, the issue is probably graph construction.
+* Are there entity nodes?
+* Are there chunk nodes?
+* Are there edges?
+* Do retrieved chunks share entities with other chunks?
+
+**EXAMPLE:**
+A useful graph summary may look like:
+
+```python
+{
+    "num_nodes": 25,
+    "num_edges": 40,
+    "num_chunk_nodes": 8,
+    "num_entity_nodes": 17
+}
+```
+
+If you see:
+
+```python
+{
+    "num_nodes": 8,
+    "num_edges": 0,
+    "num_chunk_nodes": 8,
+    "num_entity_nodes": 0
+}
+```
+
+then entity extraction probably failed or found no entities.
 
 ---
 
-## 16. Check Self-RAG
+### If Self-RAG does not retry
 
-Self-RAG retries retrieval when the first attempt is weak.
+**WHY:**
+The first attempt may already be considered answerable, or `max_attempts` may be set to `1`.
 
-If it does not retry, check:
-
-* `max_attempts` is greater than 1
-* the first retrieval attempt is actually unanswerable
-* answerability thresholds are not too loose
-
-Print attempts:
+**HOW:**
+Print each attempt:
 
 ```python
-result = self_rag_retrieve(
-    question=question,
-    retriever_fn=retriever_fn,
-    chunks=chunks,
-    max_attempts=2
-)
-
 for attempt in result["attempts"]:
     print(attempt["attempt"])
     print(attempt["query"])
     print(attempt["answerable"])
 ```
 
-If both attempts retrieve the same weak chunks, query rewriting may not be changing the query enough.
+If there is only one attempt, check `max_attempts`.
+
+If the first attempt is answerable, Self-RAG stops early on purpose.
+
+**EXAMPLE:**
+This means Self-RAG retried:
+
+```text
+1
+What is RAG?
+False
+
+2
+what is retrieval augmented generation
+True
+```
+
+This means it stopped early because the first attempt worked:
+
+```text
+1
+What is RAG?
+True
+```
 
 ---
 
-## 17. Check evaluation results
+### If evaluation accuracy is low
 
-If evaluation fails, inspect each result instead of only looking at accuracy.
+**WHY:**
+The issue may be retrieval, answerability, generation, or expected test data.
 
-Check:
-
-* expected document ID
-* returned document IDs
-* answerability result
-* final answer
-* overall success flag
-
-Example:
+**HOW:**
+Inspect each evaluation result:
 
 ```python
 for result in evaluation["results"]:
@@ -1240,135 +1499,69 @@ for result in evaluation["results"]:
     print("Returned:", result["retrieved_doc_ids"])
     print("Answerable:", result["predicted_answerable"])
     print("Success:", result["overall_success"])
+    print("---")
 ```
 
-This makes it easier to see whether the issue is retrieval, answerability, or generation.
+If the expected document is not retrieved, debug retrieval.
 
----
+If retrieval works but answerability fails, debug thresholds.
 
-## 18. Common Error Patterns
+If retrieval and answerability work but answers are bad, inspect the prompt and LLM output.
 
-### Empty query
-
-Problem:
+**EXAMPLE:**
+If you see:
 
 ```text
-ValueError: Query cannot be empty or whitespace
+Expected: doc_2
+Returned: ['doc_5', 'doc_1']
+Success: False
 ```
 
-Fix:
+the problem is retrieval.
 
-Make sure the query string is not empty before calling retrieval.
-
----
-
-### Missing embedding
-
-Problem:
+If you see:
 
 ```text
-Chunk does not have an embedding
+Expected: doc_2
+Returned: ['doc_2']
+Answerable: False
+Success: False
 ```
 
-Fix:
+the problem is likely answerability.
 
-Run the embedding step before adding chunks to Chroma or running semantic search.
-
----
-
-### Ollama connection error
-
-Problem:
+If you see:
 
 ```text
-Failed to call Ollama
+Expected: doc_2
+Returned: ['doc_2']
+Answerable: True
+Success: False
 ```
 
-Fix:
-
-Start Ollama:
-
-```bash
-ollama serve
-```
-
-Then check:
-
-```bash
-curl http://localhost:11434/api/tags
-```
+then inspect the generated answer and prompt.
 
 ---
 
-### Model not found
+## Best Debugging Habit
 
-Problem:
+As a learner, do not ask only:
 
 ```text
-model not found
+Why is the final answer wrong?
 ```
 
-Fix:
-
-Install the model:
-
-```bash
-ollama pull llama3.2:1b
-ollama pull nomic-embed-text
-```
-
----
-
-### Retrieval returns irrelevant chunks
-
-Possible causes:
-
-* chunks are too large
-* chunks are too small
-* query wording is weak
-* embeddings were not generated correctly
-* `top_k` is too low
-* documents do not contain the answer
-
----
-
-### LLM gives unsupported answer
-
-Possible causes:
-
-* prompt is too loose
-* answerability gate is not strict enough
-* irrelevant chunks were retrieved
-* too much noisy context was included
-
-Fix:
-
-* inspect retrieved chunks
-* strengthen the prompt
-* adjust answerability thresholds
-* improve retrieval or reranking
-
----
-
-## 19. Best Debugging Strategy
-
-Debug in this order:
+Ask:
 
 ```text
-1. Are documents loaded correctly?
-2. Are chunks created correctly?
-3. Do chunks have embeddings?
-4. Does retrieval return relevant chunks?
-5. Does reranking improve the order?
-6. Does answerability correctly detect useful context?
-7. Is the prompt built correctly?
-8. Is Ollama running and generating answers?
-9. Do evaluation results show where the failure happens?
+What did this step receive?
+What did this step return?
+Does that output make sense for the next step?
 ```
 
-Do not debug the LLM first.
+This helps you find where the pipeline first breaks instead of guessing at the end.
 
-Most RAG problems come from retrieval, chunking, embeddings, or prompt construction before the LLM ever answers.
+The goal is that you do not just know what failed, but also understand why it failed and how that part of the RAG pipeline affects the final answer, Most RAG problems come from retrieval, chunking, embeddings, or prompt construction before the LLM ever answers, so it is better to debug the LLM as a later step.
 
 ## How to Read the Comments
 
