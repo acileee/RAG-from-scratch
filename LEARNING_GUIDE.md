@@ -739,55 +739,636 @@ Observe:
 
 ## Debugging Tips
 
-### Check if Ollama is running
+This section gives practical checks for the most common issues you may run into while running or modifying the RAG system.
+
+A good way to debug this project is to check the pipeline in order:
+
+```text
+documents → chunks → embeddings → retrieval → context → prompt → LLM answer
+```
+
+If something breaks, start from the earlier step and move forward.
+
+---
+
+## 1. Check that Ollama is running
+
+The local LLM parts of the project depend on Ollama.
+
+Run:
 
 ```bash
 curl http://localhost:11434/api/tags
 ```
 
-If Ollama is running, this should return information about installed models.
+If Ollama is running, this should return JSON showing the models installed locally.
 
-### Check installed models
+If you get a connection error, start Ollama:
+
+```bash
+ollama serve
+```
+
+Then open a second terminal and check again:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+---
+
+## 2. Check that the required models are installed
+
+List installed models:
 
 ```bash
 ollama list
 ```
 
-You should see models such as:
+You should see the models used by the project.
 
-```text
-llama3.2:1b
-nomic-embed-text
+For local answer generation:
+
+```bash
+ollama pull llama3.2:1b
 ```
 
-### If generation fails
+For embeddings:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+If the code uses a different model name, make sure the model name in the code matches the model installed on your machine.
+
+For example, this will fail if `llama3.2:1b` is not installed:
+
+```python
+model = "llama3.2:1b"
+```
+
+---
+
+## 3. Test files one at a time
+
+If the full pipeline fails, do not start by debugging the whole system at once.
+
+Run individual files first:
+
+```bash
+python src/chunk_documents.py
+python src/local_embeddings.py
+python src/semantic_search.py
+python src/rag_pipeline.py
+python src/end_to_end_rag.py
+```
+
+This helps isolate where the problem is.
+
+If chunking fails, the issue is probably before retrieval.
+
+If embedding fails, the issue may be the embedding model or Ollama.
+
+If retrieval fails, the issue may be embeddings, similarity search, or Chroma.
+
+If generation fails, the issue is probably Ollama, the prompt, or the LLM model.
+
+---
+
+## 4. Check document format
+
+Documents should have the expected fields.
+
+A document should look like this:
+
+```python
+{
+    "doc_id": "doc_1",
+    "filename": "example.txt",
+    "text": "Your document text here."
+}
+```
+
+If a document is missing `text`, the system cannot chunk it.
+
+If a document is missing `doc_id` or `filename`, metadata may become unclear later during retrieval and evaluation.
+
+Common problems:
+
+* `text` is empty
+* `doc_id` is missing
+* `filename` is missing
+* the document is not a dictionary
+* documents are not inside a list
+
+---
+
+## 5. Check chunking output
+
+After chunking, each chunk should contain text and metadata.
+
+A chunk should look roughly like this:
+
+```python
+{
+    "chunk_id": "doc_1_chunk_0",
+    "doc_id": "doc_1",
+    "filename": "example.txt",
+    "text": "A smaller piece of the original document...",
+    "start_char": 0,
+    "end_char": 500
+}
+```
+
+If retrieval is bad, inspect the chunks first.
+
+Things to check:
+
+* Are chunks being created?
+* Is each chunk non-empty?
+* Are chunks too small?
+* Are chunks too large?
+* Is overlap working?
+* Are `doc_id` and `chunk_id` preserved?
+
+If chunks are too small, they may lose important context.
+
+If chunks are too large, retrieval may become less precise.
+
+---
+
+## 6. Check embeddings
+
+Each embedded chunk should include an `embedding` field.
+
+Example:
+
+```python
+{
+    "chunk_id": "doc_1_chunk_0",
+    "text": "Some text...",
+    "embedding": [0.012, -0.043, 0.091, ...]
+}
+```
+
+Check that embeddings exist:
+
+```python
+from local_embeddings import embed_texts
+
+embeddings = embed_texts(["hello world"])
+print(type(embeddings))
+print(len(embeddings))
+print(len(embeddings[0]))
+```
+
+Expected:
+
+* `embeddings` should be a list
+* it should contain one embedding
+* the embedding should be a list of numbers
+
+If embeddings are empty, retrieval will not work.
+
+If embeddings fail, check:
+
+* Ollama is running
+* the embedding model is installed
+* the model name is correct
+* the input text is not empty
+
+---
+
+## 7. Check manual semantic search
+
+Manual semantic search should return the top matching chunks.
+
+If results look wrong, check:
+
+* the query is not empty
+* chunks have embeddings
+* the query embedding is being created
+* similarity scores are being calculated
+* `top_k` is not too low
+
+Example checks:
+
+```python
+results = semantic_search(
+    query="What is RAG?",
+    embedded_chunks=embedded_chunks,
+    top_k=3
+)
+
+for result in results:
+    print(result["chunk_id"], result.get("score"))
+    print(result["text"][:200])
+```
+
+If the results are irrelevant, the problem may be:
+
+* weak document content
+* poor chunking
+* query wording
+* embedding mismatch
+* too small `top_k`
+
+---
+
+## 8. Check Chroma storage
+
+If you are using Chroma, make sure chunks were actually added or upserted into the collection.
+
+Things to check:
+
+* the Chroma path is correct
+* the collection name is correct
+* chunks were added before querying
+* IDs are unique
+* embeddings exist before upsert
+* documents and metadata were stored correctly
+
+If you keep getting old or strange results, you may be querying an old persistent Chroma collection.
+
+Possible fix:
+
+* use a new collection name
+* clear the local Chroma database folder
+* confirm that the current chunks are being upserted
+
+Be careful deleting local database folders if you still need the data.
+
+---
+
+## 9. Check query rewriting
+
+If query rewriting gives strange results, print the original and rewritten query.
+
+Example:
+
+```python
+from query_rewriting import rewrite_query
+
+query = "How do LLMs use RAG?"
+rewritten = rewrite_query(query)
+
+print("Original:", query)
+print("Rewritten:", rewritten)
+```
+
+Expected behavior:
+
+```text
+LLM → large language model
+RAG → retrieval augmented generation
+KG → knowledge graph
+AI → artificial intelligence
+```
+
+If rewriting makes retrieval worse, compare retrieval with and without rewriting.
+
+---
+
+## 10. Check multi-query retrieval
+
+Multi-query retrieval uses multiple versions of the same question.
+
+Debug by printing the variants:
+
+```python
+from multi_query import generate_query_variants
+
+variants = generate_query_variants("How do LLMs use RAG?")
+print(variants)
+```
+
+Then check whether each variant retrieves useful chunks.
+
+If multi-query retrieval returns duplicates, make sure results are being deduplicated by `chunk_id`.
+
+If it returns noisy results, reduce `top_k_per_query` or improve query rewriting.
+
+---
+
+## 11. Check reranking
+
+Reranking happens after retrieval.
+
+It should not create new chunks. It only reorders retrieved chunks.
+
+If reranking looks wrong, print the scores:
+
+```python
+for chunk in reranked_chunks:
+    print(chunk["chunk_id"])
+    print("original:", chunk.get("original_score"))
+    print("overlap:", chunk.get("overlap_score"))
+    print("rerank:", chunk.get("rerank_score"))
+```
+
+If overlap scores are always zero, check:
+
+* tokenization
+* query wording
+* chunk text
+* stopword removal
+
+If reranking makes results worse, compare before and after reranking.
+
+---
+
+## 12. Check answerability
+
+Answerability checks whether the retrieved context is strong enough to answer the question.
+
+If the system keeps saying:
+
+```text
+I don't know based on the provided context.
+```
+
+check:
+
+* were relevant chunks retrieved?
+* are scores too low?
+* is token overlap too low?
+* are `min_score` and `min_overlap` too strict?
+* is the query phrased differently from the documents?
+
+Try lowering thresholds temporarily:
+
+```python
+min_score = 0.1
+min_overlap = 1
+```
+
+If answerability becomes `True`, the issue was probably strict thresholds.
+
+If it is still `False`, retrieval may not be returning useful context.
+
+---
+
+## 13. Check prompt construction
+
+Before blaming the LLM, inspect the final prompt.
+
+A RAG prompt should include:
+
+* instructions
+* retrieved context
+* the user question
+* a rule to only answer from context
+
+Print the prompt:
+
+```python
+print(rag_input["prompt"])
+```
+
+Check:
+
+* Is the context empty?
+* Is the question included?
+* Are the retrieved chunks readable?
+* Is the fallback instruction included?
+
+If the prompt is empty or `None`, the answerability gate may have decided the question was not answerable.
+
+---
+
+## 14. Check local LLM generation
+
+If retrieval works but answer generation fails, the issue is probably the local LLM call.
 
 Check:
 
 * Ollama is running
 * the model is installed
-* the model name matches the code
+* the model name is correct
 * the prompt is not empty
+* the request is not timing out
 
-### If retrieval is poor
+Run a simple Ollama test outside the RAG system:
+
+```bash
+ollama run llama3.2:1b
+```
+
+Then ask a simple question.
+
+If that works, the model is fine and the issue is likely in the Python call or prompt.
+
+---
+
+## 15. Check Graph-RAG
+
+Graph-RAG depends on three things:
+
+* chunks
+* extracted entities
+* graph connections
+
+If Graph-RAG does not add extra chunks, check:
+
+* entities were extracted from chunks
+* the graph has entity nodes
+* chunk nodes are connected to entity nodes
+* related chunks share entities
+* `max_extra_chunks` is not set too low
+
+Print graph summary:
+
+```python
+summary = summarize_graph(graph)
+print(summary)
+```
+
+If there are no entity nodes, the issue is probably entity extraction.
+
+If there are no edges, the issue is probably graph construction.
+
+---
+
+## 16. Check Self-RAG
+
+Self-RAG retries retrieval when the first attempt is weak.
+
+If it does not retry, check:
+
+* `max_attempts` is greater than 1
+* the first retrieval attempt is actually unanswerable
+* answerability thresholds are not too loose
+
+Print attempts:
+
+```python
+result = self_rag_retrieve(
+    question=question,
+    retriever_fn=retriever_fn,
+    chunks=chunks,
+    max_attempts=2
+)
+
+for attempt in result["attempts"]:
+    print(attempt["attempt"])
+    print(attempt["query"])
+    print(attempt["answerable"])
+```
+
+If both attempts retrieve the same weak chunks, query rewriting may not be changing the query enough.
+
+---
+
+## 17. Check evaluation results
+
+If evaluation fails, inspect each result instead of only looking at accuracy.
 
 Check:
 
-* documents were chunked correctly
-* chunks have embeddings
-* query is not empty
-* top_k is high enough
-* chunk size is not too small or too large
-* query rewriting is being applied if needed
+* expected document ID
+* returned document IDs
+* answerability result
+* final answer
+* overall success flag
 
-### If Chroma gives strange results
+Example:
 
-Check:
+```python
+for result in evaluation["results"]:
+    print(result["question"])
+    print("Expected:", result["expected_doc_id"])
+    print("Returned:", result["retrieved_doc_ids"])
+    print("Answerable:", result["predicted_answerable"])
+    print("Success:", result["overall_success"])
+```
 
-* the collection contains data
-* embeddings were upserted
-* metadata includes chunk IDs and document IDs
-* old test collections are not polluting results
+This makes it easier to see whether the issue is retrieval, answerability, or generation.
+
+---
+
+## 18. Common Error Patterns
+
+### Empty query
+
+Problem:
+
+```text
+ValueError: Query cannot be empty or whitespace
+```
+
+Fix:
+
+Make sure the query string is not empty before calling retrieval.
+
+---
+
+### Missing embedding
+
+Problem:
+
+```text
+Chunk does not have an embedding
+```
+
+Fix:
+
+Run the embedding step before adding chunks to Chroma or running semantic search.
+
+---
+
+### Ollama connection error
+
+Problem:
+
+```text
+Failed to call Ollama
+```
+
+Fix:
+
+Start Ollama:
+
+```bash
+ollama serve
+```
+
+Then check:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+---
+
+### Model not found
+
+Problem:
+
+```text
+model not found
+```
+
+Fix:
+
+Install the model:
+
+```bash
+ollama pull llama3.2:1b
+ollama pull nomic-embed-text
+```
+
+---
+
+### Retrieval returns irrelevant chunks
+
+Possible causes:
+
+* chunks are too large
+* chunks are too small
+* query wording is weak
+* embeddings were not generated correctly
+* `top_k` is too low
+* documents do not contain the answer
+
+---
+
+### LLM gives unsupported answer
+
+Possible causes:
+
+* prompt is too loose
+* answerability gate is not strict enough
+* irrelevant chunks were retrieved
+* too much noisy context was included
+
+Fix:
+
+* inspect retrieved chunks
+* strengthen the prompt
+* adjust answerability thresholds
+* improve retrieval or reranking
+
+---
+
+## 19. Best Debugging Strategy
+
+Debug in this order:
+
+```text
+1. Are documents loaded correctly?
+2. Are chunks created correctly?
+3. Do chunks have embeddings?
+4. Does retrieval return relevant chunks?
+5. Does reranking improve the order?
+6. Does answerability correctly detect useful context?
+7. Is the prompt built correctly?
+8. Is Ollama running and generating answers?
+9. Do evaluation results show where the failure happens?
+```
+
+Do not debug the LLM first.
+
+Most RAG problems come from retrieval, chunking, embeddings, or prompt construction before the LLM ever answers.
 
 ## How to Read the Comments
 
