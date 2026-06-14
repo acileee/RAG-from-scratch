@@ -1,0 +1,17 @@
+# Core RAG Dependencies
+sentence-transformers>=2.2.0          # Local embeddings model
+chromadb>=0.4.0                       # Vector database
+networkx>=3.0                         # Knowledge graphs
+
+# LLM Integration
+requests>=2.31.0                      # HTTP requests to Ollama
+
+# LangChain (optional, for framework version)
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-ollama>=0.0.1
+
+# Utilities
+python-dotenv>=1.0.0                  # Environment variables
+numpy>=1.24.0                         # Numerical operations
+pandas>=2.0.0                         # Data manipulation (optional)
